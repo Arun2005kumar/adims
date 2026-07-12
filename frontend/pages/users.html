@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Users &mdash; ADIMS</title>
+  <link rel="stylesheet" href="../css/styles.css" />
+</head>
+<body>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script>
+    window.ADIMS_API_BASE_URL = "http://localhost:8080/api";
+    renderShell("users.html", "User Management", "Administrator, investigator and analyst accounts");
+  </script>
+
+  <template id="tpl-body">
+    <div class="page-header">
+      <div></div>
+      <button class="btn btn-primary" id="btnNewUser">+ New user</button>
+    </div>
+
+    <div class="card">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Username</th><th>Full name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th></th></tr></thead>
+          <tbody id="usersTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </template>
+
+  <!-- New user modal -->
+  <template id="tpl-modal">
+    <div class="modal-overlay" id="userModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Create user account</h3>
+          <button class="modal-close" id="modalClose">&times;</button>
+        </div>
+        <form id="userForm">
+          <div class="modal-body">
+            <div class="grid-2">
+              <div class="form-group">
+                <label>Username *</label>
+                <input type="text" id="username" required minlength="3" />
+              </div>
+              <div class="form-group">
+                <label>Full name *</label>
+                <input type="text" id="fullName" required />
+              </div>
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label>Email *</label>
+                <input type="email" id="email" required />
+              </div>
+              <div class="form-group">
+                <label>Role *</label>
+                <select id="role" required>
+                  <option value="INVESTIGATOR">Investigator</option>
+                  <option value="ANALYST">Analyst</option>
+                  <option value="ADMIN">Admin</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Temporary password *</label>
+              <input type="text" id="password" required minlength="6" placeholder="Min. 6 characters" />
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create user</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    (function init() {
+      if (!Session.hasAnyRole("ADMIN")) {
+        pageBody().innerHTML = `<div class="card"><div class="card-body"><div class="empty-state">You do not have permission to view this page.</div></div></div>`;
+        return;
+      }
+      pageBody().innerHTML = document.getElementById("tpl-body").innerHTML;
+      document.body.insertAdjacentHTML("beforeend", document.getElementById("tpl-modal").innerHTML);
+
+      document.getElementById("btnNewUser").addEventListener("click", () => document.getElementById("userModal").classList.remove("hidden"));
+      document.getElementById("modalClose").addEventListener("click", closeModal);
+      document.getElementById("cancelBtn").addEventListener("click", closeModal);
+      document.getElementById("userForm").addEventListener("submit", createUser);
+
+      loadUsers();
+    })();
+
+    function closeModal() {
+      document.getElementById("userModal").classList.add("hidden");
+      document.getElementById("userForm").reset();
+    }
+
+    async function loadUsers() {
+      try {
+        const users = await api.get("/users");
+        renderTable(users);
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    function renderTable(users) {
+      const tbody = document.getElementById("usersTbody");
+      if (!users.length) {
+        tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">No users found.</div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = users.map(u => `
+        <tr>
+          <td><strong>${escapeHtml(u.username)}</strong></td>
+          <td>${escapeHtml(u.fullName)}</td>
+          <td>${escapeHtml(u.email)}</td>
+          <td>${humanize(u.role)}</td>
+          <td>${u.active ? `<span class="badge badge-active"><span class="badge-dot"></span>Active</span>` : `<span class="badge badge-archived"><span class="badge-dot"></span>Inactive</span>`}</td>
+          <td>${formatDate(u.createdAt)}</td>
+          <td>
+            ${u.active
+              ? `<button class="btn btn-ghost btn-sm" onclick="toggleUser(${u.id}, false)">Deactivate</button>`
+              : `<button class="btn btn-secondary btn-sm" onclick="toggleUser(${u.id}, true)">Activate</button>`}
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    async function toggleUser(id, activate) {
+      try {
+        await api[activate ? "patch" : "patch"](`/users/${id}/${activate ? "activate" : "deactivate"}`, {});
+        showToast(activate ? "User activated" : "User deactivated", "success");
+        loadUsers();
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    async function createUser(e) {
+      e.preventDefault();
+      const payload = {
+        username: document.getElementById("username").value,
+        fullName: document.getElementById("fullName").value,
+        email: document.getElementById("email").value,
+        role: document.getElementById("role").value,
+        password: document.getElementById("password").value
+      };
+      try {
+        await api.post("/users", payload);
+        showToast("User account created", "success");
+        closeModal();
+        loadUsers();
+      } catch (err) {
+        showError(err);
+      }
+    }
+  </script>
+</body>
+</html>

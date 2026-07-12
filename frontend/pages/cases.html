@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Investigations &mdash; ADIMS</title>
+  <link rel="stylesheet" href="../css/styles.css" />
+</head>
+<body>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script>
+    window.ADIMS_API_BASE_URL = "http://localhost:8080/api";
+    renderShell("cases.html", "Investigations", "Active and historical anti-doping investigation case files");
+  </script>
+
+  <template id="tpl-body">
+    <div class="page-header">
+      <div class="filter-bar">
+        <div class="form-group">
+          <label>Status</label>
+          <select id="fStatus">
+            <option value="">All</option>
+            <option value="OPEN">Open</option>
+            <option value="IN_PROGRESS">In progress</option>
+            <option value="PENDING_REVIEW">Pending review</option>
+            <option value="CLOSED">Closed</option>
+            <option value="ARCHIVED">Archived</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Priority</label>
+          <select id="fPriority">
+            <option value="">All</option>
+            <option value="LOW">Low</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="HIGH">High</option>
+            <option value="CRITICAL">Critical</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" id="btnFilter">Apply filters</button>
+      </div>
+      <button class="btn btn-primary" id="btnNewCase">+ Open new case</button>
+    </div>
+
+    <div class="card">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Case #</th><th>Title</th><th>Athlete</th><th>Priority</th><th>Status</th><th>Investigator</th><th>Opened</th>
+            </tr>
+          </thead>
+          <tbody id="casesTbody"></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="pagination"></div>
+    </div>
+  </template>
+
+  <!-- New case modal -->
+  <template id="tpl-modal">
+    <div class="modal-overlay" id="caseModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Open new investigation case</h3>
+          <button class="modal-close" id="modalClose">&times;</button>
+        </div>
+        <form id="caseForm">
+          <div class="modal-body">
+            <div class="form-group">
+              <label>Title *</label>
+              <input type="text" id="title" required placeholder="e.g. Suspected supplement trafficking" />
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label>Related athlete (ID, optional)</label>
+                <input type="number" id="athleteId" placeholder="Athlete ID if known" />
+              </div>
+              <div class="form-group">
+                <label>Priority</label>
+                <select id="priority">
+                  <option value="LOW">Low</option>
+                  <option value="MEDIUM" selected>Medium</option>
+                  <option value="HIGH">High</option>
+                  <option value="CRITICAL">Critical</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Assign investigator</label>
+              <select id="assignedInvestigatorId">
+                <option value="">Unassigned</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Description</label>
+              <textarea id="description" rows="4" placeholder="Summary of the matter under investigation..."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create case</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    let currentPage = 0;
+
+    (async function init() {
+      pageBody().innerHTML = document.getElementById("tpl-body").innerHTML;
+      document.body.insertAdjacentHTML("beforeend", document.getElementById("tpl-modal").innerHTML);
+
+      const canCreate = Session.hasAnyRole("ADMIN", "INVESTIGATOR");
+      if (!canCreate) document.getElementById("btnNewCase").classList.add("hidden");
+
+      document.getElementById("btnFilter").addEventListener("click", () => { currentPage = 0; loadCases(); });
+      document.getElementById("btnNewCase").addEventListener("click", openModal);
+      document.getElementById("modalClose").addEventListener("click", closeModal);
+      document.getElementById("cancelBtn").addEventListener("click", closeModal);
+      document.getElementById("caseForm").addEventListener("submit", createCase);
+
+      await loadInvestigators();
+      loadCases();
+    })();
+
+    async function loadInvestigators() {
+      try {
+        const investigators = await api.get("/users/investigators");
+        const select = document.getElementById("assignedInvestigatorId");
+        investigators.forEach(u => {
+          const opt = document.createElement("option");
+          opt.value = u.id;
+          opt.textContent = u.fullName;
+          select.appendChild(opt);
+        });
+      } catch (err) {
+        // Non-fatal: investigator dropdown just stays limited to "Unassigned"
+        console.warn("Could not load investigators", err);
+      }
+    }
+
+    function openModal() {
+      document.getElementById("caseModal").classList.remove("hidden");
+    }
+
+    function closeModal() {
+      document.getElementById("caseModal").classList.add("hidden");
+      document.getElementById("caseForm").reset();
+    }
+
+    async function loadCases() {
+      const params = qs({
+        status: document.getElementById("fStatus").value,
+        priority: document.getElementById("fPriority").value,
+        page: currentPage,
+        size: 15
+      });
+      try {
+        const data = await api.get("/cases" + params);
+        renderTable(data);
+        renderPagination(data);
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    function renderTable(data) {
+      const tbody = document.getElementById("casesTbody");
+      if (!data.content.length) {
+        tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">No investigation cases match these filters.</div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = data.content.map(c => `
+        <tr class="clickable-row" onclick="window.location.href='case-detail.html?id=${c.id}'">
+          <td><strong>${escapeHtml(c.caseNumber)}</strong></td>
+          <td>${escapeHtml(c.title)}</td>
+          <td>${c.athleteId ? escapeHtml(c.athleteName) : "&mdash;"}</td>
+          <td>${badge(c.priority)}</td>
+          <td>${badge(c.status)}</td>
+          <td>${c.assignedInvestigatorName ? escapeHtml(c.assignedInvestigatorName) : "Unassigned"}</td>
+          <td>${formatDate(c.openedDate)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderPagination(data) {
+      document.getElementById("pagination").innerHTML = `
+        <span>Page ${data.pageNumber + 1} of ${Math.max(1, data.totalPages)} &middot; ${data.totalElements} cases</span>
+        <div class="controls">
+          <button class="btn btn-secondary btn-sm" id="prevPage" ${data.pageNumber === 0 ? "disabled" : ""}>Previous</button>
+          <button class="btn btn-secondary btn-sm" id="nextPage" ${data.last ? "disabled" : ""}>Next</button>
+        </div>
+      `;
+      document.getElementById("prevPage").addEventListener("click", () => { currentPage--; loadCases(); });
+      document.getElementById("nextPage").addEventListener("click", () => { currentPage++; loadCases(); });
+    }
+
+    async function createCase(e) {
+      e.preventDefault();
+      const athleteIdVal = document.getElementById("athleteId").value;
+      const investigatorVal = document.getElementById("assignedInvestigatorId").value;
+      const payload = {
+        title: document.getElementById("title").value,
+        athleteId: athleteIdVal ? Number(athleteIdVal) : null,
+        priority: document.getElementById("priority").value,
+        assignedInvestigatorId: investigatorVal ? Number(investigatorVal) : null,
+        description: document.getElementById("description").value || null
+      };
+      try {
+        const created = await api.post("/cases", payload);
+        showToast(`Case ${created.caseNumber} opened`, "success");
+        closeModal();
+        window.location.href = `case-detail.html?id=${created.id}`;
+      } catch (err) {
+        showError(err);
+      }
+    }
+  </script>
+</body>
+</html>

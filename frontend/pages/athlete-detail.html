@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Athlete Profile &mdash; ADIMS</title>
+  <link rel="stylesheet" href="../css/styles.css" />
+</head>
+<body>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script>
+    window.ADIMS_API_BASE_URL = "http://localhost:8080/api";
+    renderShell("athletes.html", "Athlete Profile", "Full intelligence view: risk history, testing record, tips and cases");
+  </script>
+
+  <template id="tpl-body">
+    <div class="page-header">
+      <a href="athletes.html" class="btn btn-ghost btn-sm">&larr; Back to registry</a>
+      <button class="btn btn-secondary" id="btnRecalcRisk">Recalculate risk score</button>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><h3>Profile</h3></div>
+        <div class="card-body" id="profileBox"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>Current risk assessment</h3></div>
+        <div class="card-body" id="riskBox"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header"><h3>Risk assessment history</h3></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Date</th><th>Score</th><th>Level</th><th>Open tips</th><th>Open cases</th><th>Assessed by</th></tr></thead>
+          <tbody id="riskHistoryTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header"><h3>Testing records</h3></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Result</th><th>Sample ID</th><th>Lab</th></tr></thead>
+          <tbody id="testingTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header"><h3>Related intelligence tips</h3></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Date</th><th>Category</th><th>Credibility</th><th>Status</th></tr></thead>
+          <tbody id="tipsTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header"><h3>Related investigation cases</h3></div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Case #</th><th>Title</th><th>Priority</th><th>Status</th><th>Opened</th></tr></thead>
+          <tbody id="casesTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    const athleteId = new URLSearchParams(window.location.search).get("id");
+
+    (async function init() {
+      pageBody().innerHTML = document.getElementById("tpl-body").innerHTML;
+      if (!athleteId) { showToast("No athlete specified", "error"); return; }
+
+      document.getElementById("btnRecalcRisk").addEventListener("click", recalcRisk);
+      await loadAll();
+    })();
+
+    async function loadAll() {
+      try {
+        const [athlete, riskHistory, testing, tips, cases] = await Promise.all([
+          api.get(`/athletes/${athleteId}`),
+          api.get(`/risk-assessments/athlete/${athleteId}`),
+          api.get(`/testing-records/athlete/${athleteId}`),
+          api.get(`/tips/athlete/${athleteId}`),
+          api.get(`/cases/athlete/${athleteId}`)
+        ]);
+        renderProfile(athlete);
+        renderRisk(riskHistory);
+        renderRiskHistory(riskHistory);
+        renderTesting(testing);
+        renderTips(tips);
+        renderCases(cases);
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    function renderProfile(a) {
+      document.title = `${a.firstName} ${a.lastName} \u2014 ADIMS`;
+      document.getElementById("profileBox").innerHTML = `
+        <div class="detail-row"><span class="label">Name</span><span class="value">${escapeHtml(a.firstName)} ${escapeHtml(a.lastName)}</span></div>
+        <div class="detail-row"><span class="label">Sport</span><span class="value">${escapeHtml(a.sport)}${a.discipline ? " &middot; " + escapeHtml(a.discipline) : ""}</span></div>
+        <div class="detail-row"><span class="label">Date of birth</span><span class="value">${formatDate(a.dateOfBirth)}</span></div>
+        <div class="detail-row"><span class="label">Gender</span><span class="value">${humanize(a.gender)}</span></div>
+        <div class="detail-row"><span class="label">Nationality</span><span class="value">${escapeHtml(a.nationality || "\u2014")}</span></div>
+        <div class="detail-row"><span class="label">Testing pool</span><span class="value">${badge(a.testingPool)}</span></div>
+        <div class="detail-row"><span class="label">Status</span><span class="value">${badge(a.status)}</span></div>
+      `;
+    }
+
+    function renderRisk(history) {
+      const latest = history[0];
+      const box = document.getElementById("riskBox");
+      if (!latest) {
+        box.innerHTML = `<div class="empty-state text-sm">No risk assessment yet. Click "Recalculate risk score" to generate one.</div>`;
+        return;
+      }
+      const pct = Math.min(100, latest.riskScore);
+      const color = latest.riskLevel === "CRITICAL" ? "var(--color-danger)" :
+                    latest.riskLevel === "HIGH" ? "var(--color-danger)" :
+                    latest.riskLevel === "MEDIUM" ? "var(--color-warning)" : "var(--color-success)";
+      box.innerHTML = `
+        <div class="flex-between"><h2 style="margin:0;">${latest.riskScore} / 100</h2>${badge(latest.riskLevel)}</div>
+        <div class="risk-score-bar"><div class="risk-score-bar-fill" style="width:${pct}%; background:${color};"></div></div>
+        <div class="text-sm text-muted" style="margin-top:10px;">${escapeHtml(latest.notes || "")}</div>
+        <div class="detail-row" style="margin-top:8px;"><span class="label">Open tips</span><span class="value">${latest.openTipsCount}</span></div>
+        <div class="detail-row"><span class="label">Open cases</span><span class="value">${latest.openCasesCount}</span></div>
+        <div class="detail-row"><span class="label">Prior violations</span><span class="value">${latest.priorViolationsCount}</span></div>
+        <div class="detail-row"><span class="label">Assessed on</span><span class="value">${formatDate(latest.assessmentDate)} by ${escapeHtml(latest.assessedByUsername)}</span></div>
+      `;
+    }
+
+    function renderRiskHistory(history) {
+      const tbody = document.getElementById("riskHistoryTbody");
+      if (!history.length) {
+        tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">No assessments recorded.</div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = history.map(r => `
+        <tr>
+          <td>${formatDate(r.assessmentDate)}</td>
+          <td>${r.riskScore}</td>
+          <td>${badge(r.riskLevel)}</td>
+          <td>${r.openTipsCount}</td>
+          <td>${r.openCasesCount}</td>
+          <td>${escapeHtml(r.assessedByUsername)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderTesting(records) {
+      const tbody = document.getElementById("testingTbody");
+      if (!records.length) {
+        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">No testing records on file.</div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = records.map(r => `
+        <tr>
+          <td>${formatDate(r.testDate)}</td>
+          <td>${humanize(r.testType)}</td>
+          <td>${badge(r.result)}</td>
+          <td>${escapeHtml(r.sampleId || "\u2014")}</td>
+          <td>${escapeHtml(r.labName || "\u2014")}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderTips(tips) {
+      const tbody = document.getElementById("tipsTbody");
+      if (!tips.length) {
+        tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">No intelligence tips reference this athlete.</div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = tips.map(t => `
+        <tr class="clickable-row" onclick="window.location.href='tips.html'">
+          <td>${formatDate(t.createdAt)}</td>
+          <td>${humanize(t.category)}</td>
+          <td>${t.credibilityScore} / 5</td>
+          <td>${badge(t.status)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderCases(cases) {
+      const tbody = document.getElementById("casesTbody");
+      if (!cases.length) {
+        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">No investigation cases for this athlete.</div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = cases.map(c => `
+        <tr class="clickable-row" onclick="window.location.href='case-detail.html?id=${c.id}'">
+          <td><strong>${escapeHtml(c.caseNumber)}</strong></td>
+          <td>${escapeHtml(c.title)}</td>
+          <td>${badge(c.priority)}</td>
+          <td>${badge(c.status)}</td>
+          <td>${formatDate(c.openedDate)}</td>
+        </tr>
+      `).join("");
+    }
+
+    async function recalcRisk() {
+      try {
+        await api.post(`/risk-assessments/athlete/${athleteId}/recalculate`, {});
+        showToast("Risk score recalculated", "success");
+        loadAll();
+      } catch (err) {
+        showError(err);
+      }
+    }
+  </script>
+</body>
+</html>

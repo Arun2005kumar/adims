@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard &mdash; ADIMS</title>
+  <link rel="stylesheet" href="../css/styles.css" />
+</head>
+<body>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script>
+    window.ADIMS_API_BASE_URL = "http://localhost:8080/api";
+    renderShell("dashboard.html", "Dashboard", "Command overview of athletes, tips and active investigations");
+  </script>
+
+  <template id="tpl-body">
+    <div class="stat-grid" id="statGrid"></div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><h3>Cases by status</h3></div>
+        <div class="card-body" id="casesByStatus"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>Athletes by risk level</h3></div>
+        <div class="card-body" id="athletesByRisk"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header">
+        <h3>Quick actions</h3>
+      </div>
+      <div class="card-body flex-gap flex-wrap">
+        <a href="tips.html" class="btn btn-secondary">Review intelligence tips</a>
+        <a href="cases.html" class="btn btn-secondary">Open investigations</a>
+        <a href="athletes.html" class="btn btn-secondary">Athlete registry</a>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    (async function init() {
+      pageBody().innerHTML = document.getElementById("tpl-body").innerHTML;
+      try {
+        const summary = await api.get("/dashboard/summary");
+        renderStats(summary);
+        renderBarList("casesByStatus", summary.casesByStatus, "cases");
+        renderBarList("athletesByRisk", summary.athletesByRiskLevel, "athletes");
+      } catch (err) {
+        showError(err);
+      }
+    })();
+
+    function renderStats(summary) {
+      const stats = [
+        { label: "Total athletes", value: summary.totalAthletes, sub: "in registry" },
+        { label: "High / critical risk", value: summary.highRiskAthletes, sub: "athletes flagged" },
+        { label: "Open investigations", value: summary.openCases, sub: `${summary.totalCases} total cases` },
+        { label: "New intelligence tips", value: summary.newTips, sub: `${summary.pendingReviewTips} under review` }
+      ];
+      document.getElementById("statGrid").innerHTML = stats.map(s => `
+        <div class="stat-card">
+          <div class="stat-label">${s.label}</div>
+          <div class="stat-value">${s.value}</div>
+          <div class="stat-sub">${s.sub}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderBarList(containerId, dataMap, unit) {
+      const entries = Object.entries(dataMap || {});
+      const max = Math.max(1, ...entries.map(([, v]) => v));
+      const container = document.getElementById(containerId);
+      if (entries.every(([, v]) => v === 0)) {
+        container.innerHTML = `<div class="empty-state text-sm">No data yet</div>`;
+        return;
+      }
+      container.innerHTML = entries.map(([key, value]) => `
+        <div style="margin-bottom:10px;">
+          <div class="flex-between text-sm" style="margin-bottom:4px;">
+            <span>${humanize(key)}</span>
+            <strong>${value}</strong>
+          </div>
+          <div class="risk-score-bar">
+            <div class="risk-score-bar-fill" style="width:${(value / max) * 100}%; background: var(--color-accent);"></div>
+          </div>
+        </div>
+      `).join("");
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelligence Tips &mdash; ADIMS</title>
+  <link rel="stylesheet" href="../css/styles.css" />
+</head>
+<body>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script>
+    window.ADIMS_API_BASE_URL = "http://localhost:8080/api";
+    renderShell("tips.html", "Intelligence Tips", "Informant reports, lab flags and other leads awaiting review");
+  </script>
+
+  <template id="tpl-body">
+    <div class="page-header">
+      <div class="filter-bar">
+        <div class="form-group">
+          <label>Status</label>
+          <select id="fStatus">
+            <option value="">All</option>
+            <option value="NEW">New</option>
+            <option value="UNDER_REVIEW">Under review</option>
+            <option value="ESCALATED">Escalated</option>
+            <option value="CLOSED">Closed</option>
+            <option value="DISMISSED">Dismissed</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Category</label>
+          <select id="fCategory">
+            <option value="">All</option>
+            <option value="DOPING_SUBSTANCE">Doping substance</option>
+            <option value="TRAFFICKING">Trafficking</option>
+            <option value="METHOD_VIOLATION">Method violation</option>
+            <option value="WHEREABOUTS_FAILURE">Whereabouts failure</option>
+            <option value="ENTOURAGE_INVOLVEMENT">Entourage involvement</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" id="btnFilter">Apply filters</button>
+      </div>
+      <button class="btn btn-primary" id="btnNewTip">+ Log new tip</button>
+    </div>
+
+    <div class="card">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Received</th><th>Source</th><th>Athlete</th><th>Category</th><th>Credibility</th><th>Status</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="tipsTbody"></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="pagination"></div>
+    </div>
+  </template>
+
+  <!-- New tip modal -->
+  <template id="tpl-modal">
+    <div class="modal-overlay" id="tipModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Log intelligence tip</h3>
+          <button class="modal-close" id="modalClose">&times;</button>
+        </div>
+        <form id="tipForm">
+          <div class="modal-body">
+            <div class="grid-2">
+              <div class="form-group">
+                <label>Source type *</label>
+                <select id="sourceType" required>
+                  <option value="ANONYMOUS">Anonymous</option>
+                  <option value="INFORMANT">Informant</option>
+                  <option value="WHISTLEBLOWER">Whistleblower</option>
+                  <option value="LAB">Laboratory</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Source reference / contact</label>
+                <input type="text" id="sourceContact" placeholder="Optional, e.g. informant code" />
+              </div>
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label>Related athlete (ID, optional)</label>
+                <input type="number" id="athleteId" placeholder="Athlete ID if known" />
+              </div>
+              <div class="form-group">
+                <label>Category *</label>
+                <select id="category" required>
+                  <option value="DOPING_SUBSTANCE">Doping substance</option>
+                  <option value="TRAFFICKING">Trafficking</option>
+                  <option value="METHOD_VIOLATION">Method violation</option>
+                  <option value="WHEREABOUTS_FAILURE">Whereabouts failure</option>
+                  <option value="ENTOURAGE_INVOLVEMENT">Entourage involvement</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Credibility score (1&ndash;5) *</label>
+              <input type="number" id="credibilityScore" min="1" max="5" value="3" required />
+            </div>
+            <div class="form-group">
+              <label>Description *</label>
+              <textarea id="description" rows="4" required placeholder="Details of the tip / observation..."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
+            <button type="submit" class="btn btn-primary">Submit tip</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    let currentPage = 0;
+
+    (function init() {
+      pageBody().innerHTML = document.getElementById("tpl-body").innerHTML;
+      document.body.insertAdjacentHTML("beforeend", document.getElementById("tpl-modal").innerHTML);
+
+      document.getElementById("btnFilter").addEventListener("click", () => { currentPage = 0; loadTips(); });
+      document.getElementById("btnNewTip").addEventListener("click", () => document.getElementById("tipModal").classList.remove("hidden"));
+      document.getElementById("modalClose").addEventListener("click", closeModal);
+      document.getElementById("cancelBtn").addEventListener("click", closeModal);
+      document.getElementById("tipForm").addEventListener("submit", submitTip);
+
+      loadTips();
+    })();
+
+    function closeModal() {
+      document.getElementById("tipModal").classList.add("hidden");
+      document.getElementById("tipForm").reset();
+    }
+
+    async function loadTips() {
+      const params = qs({
+        status: document.getElementById("fStatus").value,
+        category: document.getElementById("fCategory").value,
+        page: currentPage,
+        size: 15
+      });
+      try {
+        const data = await api.get("/tips" + params);
+        renderTable(data);
+        renderPagination(data);
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    function renderTable(data) {
+      const tbody = document.getElementById("tipsTbody");
+      const canAct = Session.hasAnyRole("ADMIN", "INVESTIGATOR", "ANALYST");
+      if (!data.content.length) {
+        tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">No intelligence tips match these filters.</div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = data.content.map(t => `
+        <tr>
+          <td>${formatDate(t.createdAt)}</td>
+          <td>${humanize(t.sourceType)}${t.sourceContact ? `<div class="text-sm text-muted">${escapeHtml(t.sourceContact)}</div>` : ""}</td>
+          <td>${t.athleteId ? `<a href="athlete-detail.html?id=${t.athleteId}">${escapeHtml(t.athleteName)}</a>` : "&mdash;"}</td>
+          <td>${humanize(t.category)}</td>
+          <td>${t.credibilityScore} / 5</td>
+          <td>${badge(t.status)}</td>
+          <td>
+            ${canAct ? renderRowActions(t) : ""}
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    function renderRowActions(t) {
+      const canEscalate = Session.hasAnyRole("ADMIN", "INVESTIGATOR") && t.status !== "ESCALATED" && t.status !== "CLOSED" && t.status !== "DISMISSED";
+      let html = `<div class="flex-gap">`;
+      if (t.status === "NEW") {
+        html += `<button class="btn btn-secondary btn-sm" onclick="updateStatus(${t.id}, 'UNDER_REVIEW')">Review</button>`;
+      }
+      if (canEscalate) {
+        html += `<button class="btn btn-primary btn-sm" onclick="escalate(${t.id})">Escalate</button>`;
+      }
+      if (t.status !== "CLOSED" && t.status !== "DISMISSED" && t.status !== "ESCALATED") {
+        html += `<button class="btn btn-ghost btn-sm" onclick="updateStatus(${t.id}, 'DISMISSED')">Dismiss</button>`;
+      }
+      html += `</div>`;
+      return html;
+    }
+
+    async function updateStatus(id, status) {
+      try {
+        await api.patch(`/tips/${id}/status`, { status });
+        showToast("Tip status updated", "success");
+        loadTips();
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    async function escalate(id) {
+      if (!confirm("Escalate this tip into a formal investigation case?")) return;
+      try {
+        const created = await api.post(`/tips/${id}/escalate`, {});
+        showToast(`Case ${created.caseNumber} opened`, "success");
+        window.location.href = `case-detail.html?id=${created.id}`;
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    function renderPagination(data) {
+      document.getElementById("pagination").innerHTML = `
+        <span>Page ${data.pageNumber + 1} of ${Math.max(1, data.totalPages)} &middot; ${data.totalElements} tips</span>
+        <div class="controls">
+          <button class="btn btn-secondary btn-sm" id="prevPage" ${data.pageNumber === 0 ? "disabled" : ""}>Previous</button>
+          <button class="btn btn-secondary btn-sm" id="nextPage" ${data.last ? "disabled" : ""}>Next</button>
+        </div>
+      `;
+      document.getElementById("prevPage").addEventListener("click", () => { currentPage--; loadTips(); });
+      document.getElementById("nextPage").addEventListener("click", () => { currentPage++; loadTips(); });
+    }
+
+    async function submitTip(e) {
+      e.preventDefault();
+      const athleteIdVal = document.getElementById("athleteId").value;
+      const payload = {
+        sourceType: document.getElementById("sourceType").value,
+        sourceContact: document.getElementById("sourceContact").value || null,
+        athleteId: athleteIdVal ? Number(athleteIdVal) : null,
+        category: document.getElementById("category").value,
+        credibilityScore: Number(document.getElementById("credibilityScore").value),
+        description: document.getElementById("description").value
+      };
+      try {
+        await api.post("/tips", payload);
+        showToast("Intelligence tip logged", "success");
+        closeModal();
+        loadTips();
+      } catch (err) {
+        showError(err);
+      }
+    }
+  </script>
+</body>
+</html>

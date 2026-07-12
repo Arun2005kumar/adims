@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Case File &mdash; ADIMS</title>
+  <link rel="stylesheet" href="../css/styles.css" />
+</head>
+<body>
+  <script src="../js/api.js"></script>
+  <script src="../js/nav.js"></script>
+  <script>
+    window.ADIMS_API_BASE_URL = "http://localhost:8080/api";
+    renderShell("cases.html", "Case File", "Investigation details, timeline notes and collected evidence");
+  </script>
+
+  <template id="tpl-body">
+    <div class="page-header">
+      <a href="cases.html" class="btn btn-ghost btn-sm">&larr; Back to investigations</a>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><h3>Case summary</h3></div>
+        <div class="card-body" id="summaryBox"></div>
+      </div>
+      <div class="card" id="actionsCard">
+        <div class="card-header"><h3>Actions</h3></div>
+        <div class="card-body" id="actionsBox"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header"><h3>Investigation notes</h3></div>
+      <div class="card-body">
+        <div id="notesList" class="timeline"></div>
+        <form id="noteForm" class="add-note-form">
+          <textarea id="noteText" rows="2" placeholder="Add a note to the case timeline..." required></textarea>
+          <button type="submit" class="btn btn-secondary btn-sm">Add note</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-header">
+        <h3>Evidence log</h3>
+        <button class="btn btn-secondary btn-sm" id="btnAddEvidence">+ Add evidence</button>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Reference</th><th>Collected by</th></tr></thead>
+          <tbody id="evidenceTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </template>
+
+  <!-- Evidence modal -->
+  <template id="tpl-modal">
+    <div class="modal-overlay" id="evidenceModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Add evidence</h3>
+          <button class="modal-close" id="modalClose">&times;</button>
+        </div>
+        <form id="evidenceForm">
+          <div class="modal-body">
+            <div class="grid-2">
+              <div class="form-group">
+                <label>Type *</label>
+                <select id="evType" required>
+                  <option value="DOCUMENT">Document</option>
+                  <option value="TESTIMONY">Testimony</option>
+                  <option value="LAB_RESULT">Lab result</option>
+                  <option value="FINANCIAL_RECORD">Financial record</option>
+                  <option value="COMMUNICATION_LOG">Communication log</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Collected date</label>
+                <input type="date" id="evDate" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Description *</label>
+              <textarea id="evDescription" rows="3" required></textarea>
+            </div>
+            <div class="form-group">
+              <label>File reference / path</label>
+              <input type="text" id="evFileRef" placeholder="Optional storage reference or filename" />
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save evidence</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </template>
+
+  <script>
+    const caseId = new URLSearchParams(window.location.search).get("id");
+    const canManage = () => Session.hasAnyRole("ADMIN", "INVESTIGATOR");
+
+    (async function init() {
+      pageBody().innerHTML = document.getElementById("tpl-body").innerHTML;
+      document.body.insertAdjacentHTML("beforeend", document.getElementById("tpl-modal").innerHTML);
+
+      if (!caseId) { showToast("No case specified", "error"); return; }
+
+      document.getElementById("noteForm").addEventListener("submit", addNote);
+      document.getElementById("btnAddEvidence").addEventListener("click", () => document.getElementById("evidenceModal").classList.remove("hidden"));
+      document.getElementById("modalClose").addEventListener("click", closeEvidenceModal);
+      document.getElementById("cancelBtn").addEventListener("click", closeEvidenceModal);
+      document.getElementById("evidenceForm").addEventListener("submit", addEvidence);
+
+      if (!canManage()) {
+        document.getElementById("btnAddEvidence").classList.add("hidden");
+      }
+
+      await loadAll();
+    })();
+
+    function closeEvidenceModal() {
+      document.getElementById("evidenceModal").classList.add("hidden");
+      document.getElementById("evidenceForm").reset();
+    }
+
+    async function loadAll() {
+      try {
+        const [caseData, notes, evidence] = await Promise.all([
+          api.get(`/cases/${caseId}`),
+          api.get(`/cases/${caseId}/notes`),
+          api.get(`/cases/${caseId}/evidence`)
+        ]);
+        document.title = `${caseData.caseNumber} \u2014 ADIMS`;
+        renderSummary(caseData);
+        renderActions(caseData);
+        renderNotes(notes);
+        renderEvidence(evidence);
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    function renderSummary(c) {
+      document.getElementById("summaryBox").innerHTML = `
+        <div class="detail-row"><span class="label">Case number</span><span class="value"><strong>${escapeHtml(c.caseNumber)}</strong></span></div>
+        <div class="detail-row"><span class="label">Title</span><span class="value">${escapeHtml(c.title)}</span></div>
+        <div class="detail-row"><span class="label">Athlete</span><span class="value">${c.athleteId ? `<a href="athlete-detail.html?id=${c.athleteId}">${escapeHtml(c.athleteName)}</a>` : "&mdash;"}</span></div>
+        <div class="detail-row"><span class="label">Priority</span><span class="value">${badge(c.priority)}</span></div>
+        <div class="detail-row"><span class="label">Status</span><span class="value">${badge(c.status)}</span></div>
+        <div class="detail-row"><span class="label">Investigator</span><span class="value">${c.assignedInvestigatorName ? escapeHtml(c.assignedInvestigatorName) : "Unassigned"}</span></div>
+        <div class="detail-row"><span class="label">Opened</span><span class="value">${formatDate(c.openedDate)}</span></div>
+        ${c.closedDate ? `<div class="detail-row"><span class="label">Closed</span><span class="value">${formatDate(c.closedDate)}</span></div>` : ""}
+        ${c.description ? `<div style="margin-top:10px;" class="text-sm">${escapeHtml(c.description)}</div>` : ""}
+        ${c.outcome ? `<div style="margin-top:10px;" class="text-sm"><strong>Outcome:</strong> ${escapeHtml(c.outcome)}</div>` : ""}
+      `;
+    }
+
+    async function renderActions(c) {
+      const box = document.getElementById("actionsBox");
+      if (!canManage()) {
+        box.innerHTML = `<div class="empty-state text-sm">Only investigators and administrators can update this case.</div>`;
+        return;
+      }
+
+      let investigatorOptions = `<option value="">Select investigator...</option>`;
+      try {
+        const investigators = await api.get("/users/investigators");
+        investigatorOptions += investigators.map(u =>
+          `<option value="${u.id}" ${c.assignedInvestigatorId === u.id ? "selected" : ""}>${escapeHtml(u.fullName)}</option>`).join("");
+      } catch (err) { /* non-fatal */ }
+
+      box.innerHTML = `
+        <div class="form-group">
+          <label>Assign investigator</label>
+          <div class="flex-gap">
+            <select id="assignSelect" style="flex:1;">${investigatorOptions}</select>
+            <button class="btn btn-secondary btn-sm" id="btnAssign">Assign</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Update status</label>
+          <div class="flex-gap">
+            <select id="statusSelect" style="flex:1;">
+              ${["OPEN","IN_PROGRESS","PENDING_REVIEW","CLOSED","ARCHIVED"].map(s =>
+                `<option value="${s}" ${c.status === s ? "selected" : ""}>${humanize(s)}</option>`).join("")}
+            </select>
+            <button class="btn btn-primary btn-sm" id="btnStatus">Update</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Outcome / closing notes</label>
+          <textarea id="outcomeText" rows="3" placeholder="Required when closing or archiving the case">${escapeHtml(c.outcome || "")}</textarea>
+        </div>
+      `;
+
+      document.getElementById("btnAssign").addEventListener("click", async () => {
+        const investigatorId = document.getElementById("assignSelect").value;
+        if (!investigatorId) { showToast("Select an investigator first", "error"); return; }
+        try {
+          await api.patch(`/cases/${caseId}/assign`, { investigatorId: Number(investigatorId) });
+          showToast("Case assigned", "success");
+          loadAll();
+        } catch (err) { showError(err); }
+      });
+
+      document.getElementById("btnStatus").addEventListener("click", async () => {
+        const status = document.getElementById("statusSelect").value;
+        const outcome = document.getElementById("outcomeText").value || null;
+        try {
+          await api.patch(`/cases/${caseId}/status`, { status, outcome });
+          showToast("Case status updated", "success");
+          loadAll();
+        } catch (err) { showError(err); }
+      });
+    }
+
+    function renderNotes(notes) {
+      const list = document.getElementById("notesList");
+      if (!notes.length) {
+        list.innerHTML = `<div class="empty-state text-sm">No notes recorded yet.</div>`;
+        return;
+      }
+      list.innerHTML = notes.map(n => `
+        <div class="timeline-item">
+          <div class="timeline-meta"><strong>${escapeHtml(n.authorUsername)}</strong> &middot; ${formatDateTime(n.createdAt)}</div>
+          <div class="timeline-text">${escapeHtml(n.note)}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderEvidence(items) {
+      const tbody = document.getElementById("evidenceTbody");
+      if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">No evidence logged for this case.</div></td></tr>`;
+        return;
+      }
+      tbody.innerHTML = items.map(e => `
+        <tr>
+          <td>${formatDate(e.collectedDate)}</td>
+          <td>${humanize(e.type)}</td>
+          <td>${escapeHtml(e.description)}</td>
+          <td>${escapeHtml(e.fileReference || "\u2014")}</td>
+          <td>${escapeHtml(e.collectedByUsername || "\u2014")}</td>
+        </tr>
+      `).join("");
+    }
+
+    async function addNote(e) {
+      e.preventDefault();
+      const note = document.getElementById("noteText").value;
+      try {
+        await api.post(`/cases/${caseId}/notes`, { note });
+        document.getElementById("noteText").value = "";
+        loadAll();
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    async function addEvidence(e) {
+      e.preventDefault();
+      const payload = {
+        type: document.getElementById("evType").value,
+        description: document.getElementById("evDescription").value,
+        fileReference: document.getElementById("evFileRef").value || null,
+        collectedDate: document.getElementById("evDate").value || null
+      };
+      try {
+        await api.post(`/cases/${caseId}/evidence`, payload);
+        showToast("Evidence recorded", "success");
+        closeEvidenceModal();
+        loadAll();
+      } catch (err) {
+        showError(err);
+      }
+    }
+  </script>
+</body>
+</html>

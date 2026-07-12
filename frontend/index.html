@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ADIMS &mdash; Sign in</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="auth-shell">
+    <div class="auth-card">
+      <div class="auth-logo">AD</div>
+      <div class="auth-title">Anti-Doping Intelligence &amp;<br/>Investigation Management</div>
+      <div class="auth-subtitle">Sign in to access the intelligence and case management console.</div>
+
+      <div id="loginError" class="auth-error hidden"></div>
+
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" autocomplete="username" required />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="loginBtn">Sign in</button>
+      </form>
+
+      <div class="auth-demo-box">
+        <strong>Demo accounts</strong> (seeded via Flyway):<br/>
+        admin / Admin@123 &mdash; full administrative access<br/>
+        investigator / Investigator@123 &mdash; case management<br/>
+        analyst / Analyst@123 &mdash; intelligence &amp; risk review<br/>
+        <em>Change these credentials before any real deployment.</em>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/api.js"></script>
+  <script>
+    if (Session.isAuthenticated()) {
+      window.location.href = "pages/dashboard.html";
+    }
+
+    document.getElementById("loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errorBox = document.getElementById("loginError");
+      const btn = document.getElementById("loginBtn");
+      errorBox.classList.add("hidden");
+
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Signing in...';
+
+      try {
+        const response = await api.post("/auth/login", { username, password });
+        Session.save(response);
+        window.location.href = "pages/dashboard.html";
+      } catch (err) {
+        errorBox.textContent = err.message || "Invalid username or password";
+        errorBox.classList.remove("hidden");
+        btn.disabled = false;
+        btn.textContent = "Sign in";
+      }
+    });
+  </script>
+</body>
+</html>
