@@ -174,7 +174,42 @@ Log in with any of the demo accounts above.
 
 ---
 
-## 7. Notes on the risk-scoring model
+## 7. Deployment on Railway.app (One-Click)
+
+This project is configured for automatic deployment on Railway.app with a single click:
+
+### Quick Deploy Steps:
+1. **Sign up** on https://railway.app (free, GitHub login)
+2. Click **"New Project"** → **"Deploy from GitHub"**
+3. Select repository: `Arun2005kumar/adims`
+4. Railway automatically detects the `Dockerfile` and starts building
+5. Once deployment completes, you get a public URL: `https://your-app.railway.app`
+6. **Add PostgreSQL database:**
+   - Click **"+ New"** → **"Database"** → **"PostgreSQL"**
+   - Railway automatically provisions and links it
+7. **Configure environment variables** in Railway dashboard:
+   - `JWT_SECRET` — change to a secure random string in production
+   - `CORS_ALLOWED_ORIGINS` — add your Railway URL: `https://your-app.railway.app`
+8. **Deploy!** Your app is now live 🚀
+
+**Full deployment guide:** see [DEPLOYMENT.md](./DEPLOYMENT.md)
+
+### What happens on deploy:
+- Railway builds a Docker image from `Dockerfile`
+- Multi-stage build compiles Java 21 code and creates a minimal runtime image
+- Backend runs on port 8080
+- Frontend is served from the same container
+- PostgreSQL is auto-provisioned and connected
+- Flyway migrations run automatically on startup
+
+**Access your live app:**
+- Frontend: `https://your-app.railway.app`
+- API: `https://your-app.railway.app/api`
+- Demo login: `admin` / `Admin@123`
+
+---
+
+## 8. Notes on the risk-scoring model
 
 `RiskAssessmentServiceImpl.recalculate()` implements a simple, explainable rule-based score
 (0–100, weighted: open tips ×10, open cases ×20, adverse test results ×25, prior violations ×15,
@@ -184,7 +219,7 @@ weights against historical case outcomes.
 
 ---
 
-## 8. Security notes for a real deployment
+## 9. Security notes for a real deployment
 
 This project is built to demonstrate solid architecture for an academic/demo setting. Before any
 real-world use you should additionally: rotate `JWT_SECRET` to a strong random value and keep it
